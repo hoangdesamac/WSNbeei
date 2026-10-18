@@ -3,10 +3,6 @@
 SoilMoisture::SoilMoisture(uint8_t pinAO, uint8_t pinDO) {
   _pinAO = pinAO;
   _pinDO = pinDO;
-  _thetaSat = 0.4;
-  _thetaDry = 0.05;
-  _adcSat = 1100;
-  _adcDry = 3200;
 }
 
 void SoilMoisture::begin(float thetaSat, float thetaDry, int adcSat,

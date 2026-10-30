@@ -1,100 +1,74 @@
-#include "HardwareSerial.h"
 #include <Arduino.h>
-
-// 1. Thư viện nâng cao cho ADXL345
-#include <Adafruit_ADXL345_U.h>
-#include <Adafruit_Sensor.h>
-
-// 2. Thư viện nâng cao cho GY-271 (QMC5883L)
-#include <QMC5883LCompass.h>
-
-// 3. Thư viện LoRa
+#include <SPI.h>
 #include <LoRa.h>
-#include <PinConfig.h>
-#include <cstdint>
 
-// 4. Thư viện Cảm biến độ ẩm đất (Do bạn tự viết trong lib/SoilMoisture)
-#include <soilmoisture.h>
+// Bê nguyên định nghĩa chân từ file PinConfig của bạn sang đây để chạy độc lập
+#define LORA_SS_PIN    5   // Chân CS / NSS
+#define LORA_RST_PIN   14  // Chân Reset
+#define LORA_DIO0_PIN  2   // Chân DIO0
 
-SoilMoisture humSensor(humSensorAO, humSensorDO);
-Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
-QMC5883LCompass compass;
-
-typedef struct __attribute__((packed)) {
-  uint16_t packetId;
-  float soilTheta;
-  float accelX;
-  float accelY;
-  float accelZ;
-  int compassAzimuth;
-} SensorPayload;
-
-SensorPayload payload;
-uint16_t packetCounter = 0;
+#define LORA_SCK_PIN   18  // SPI Clock
+#define LORA_MISO_PIN  19  // SPI MISO
+#define LORA_MOSI_PIN  23  // SPI MOSI
 
 void setup() {
   Serial.begin(115200);
+  delay(1500); // Chờ Serial Monitor mở hẳn
+  
+  Serial.println("\n==================================");
+  Serial.println("    TEST DOC LAP MODULE LORA");
+  Serial.println("==================================");
 
-  // ESP32 ADC: do phan giai 12 bit (0-4095)
-  analogReadResolution(12);
+  // 1. Cấu hình và khởi tạo chân SPI cho ESP32
+  Serial.println("[1] Dang khoi tao bus SPI...");
+  SPI.begin(LORA_SCK_PIN, LORA_MISO_PIN, LORA_MOSI_PIN, LORA_SS_PIN);
+  LoRa.setSPI(SPI);
 
-  pinMode(humSensorDO, INPUT);
-  pinMode(humSensorAO, INPUT);
-
-  // Cấu hình cảm biến độ ẩm đất
-  humSensor.begin(0.40, 0.05, 1100, 3200);
-
-  // Tao ra I2C bus
-  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-  if (!accel.begin()) {
-    /* code */
-    Serial.println("Ooops, no ADXL345 detected ... Check your wiring!");
-  } else {
-    accel.setRange(ADXL345_RANGE_2_G);
-  }
-  compass.init();
-
-  // Cấu hình LoRa
+  // 2. Gán các chân điều khiển cho thư viện LoRa
+  Serial.println("[2] Dang gan chan LoRa (CS=5, RST=14, DIO0=2)...");
   LoRa.setPins(LORA_SS_PIN, LORA_RST_PIN, LORA_DIO0_PIN);
 
-  // Cấu hình soil moisture sensor
+  // 3. Khởi tạo tần số 433MHz
+  Serial.println("[3] Dang giao tiep voi chip LoRa (begin 433E6)...");
   if (!LoRa.begin(433E6)) {
-    /* code */
-    Serial.println("Starting LoRa failed!");
-    while (1)
-      ;
+    Serial.println("---------------------------------------------");
+    Serial.println("[LOI FATAL] KHONG THE GIAO TIEP VOI LORA!");
+    Serial.println("Cac nguyen nhan thuong gap:");
+    Serial.println(" - Nguon: Module chua duoc cap nguon 3.3V (Tuyet doi khong cam 5V).");
+    Serial.println(" - Đau day: MISO va MOSI bi cam nguoc vao nhau.");
+    Serial.println(" - Day lỏng: Mot trong cac day SCK, MISO, MOSI, CS bi đut ngam hoac lỏng.");
+    Serial.println(" - Module hu hỏng: IC LoRa da bi chet.");
+    Serial.println("---------------------------------------------");
+    while (true) {
+      delay(1000); // Treo vĩnh viễn ở đây nếu lỗi
+    }
   }
 
-  // Cấu hình các thông số LoRa
+  Serial.println("[THANH CONG] Khoi tao LoRa hoan tat!");
+  
+  // Tùy chỉnh thông số phát (giống code chính của bạn)
   LoRa.setSpreadingFactor(7);
-  LoRa.setTxPower(20);
-  Serial.println("LoRa Initial OK!");
+  LoRa.setSignalBandwidth(125E3);
+  LoRa.setCodingRate4(5);
+  LoRa.setTxPower(17);
 }
 
 void loop() {
-  packetCounter++;
-
-  // Đọc giá trị độ ẩm đất
-  payload.soilTheta = humSensor.readTheta();
-
-  // Giá trị compass trả về là độ (0-360)
-  sensors_event_t event;
-  accel.getEvent(&event);
-  payload.accelX = event.acceleration.x;
-  payload.accelY = event.acceleration.y;
-  payload.accelZ = event.acceleration.z;
-
-  // Lấy giá trị Azimuth từ cảm biến la bàn QMC5883L
-  compass.read();
-  payload.compassAzimuth = compass.getAzimuth();
-
-  payload.packetId = packetCounter;
-  Serial.printf("Gửi Packet #%d | Theta: %.2f | X: %.2f | Azimuth: %d\n",
-                payload.packetId, payload.soilTheta, payload.accelX,
-                payload.compassAzimuth);
+  Serial.print("Dang gui goi tin test... ");
+  
+  // Mở gói tin
   LoRa.beginPacket();
-  LoRa.write((uint8_t *)&payload, sizeof(SensorPayload));
-  LoRa.endPacket();
+  LoRa.print("Hello LoRa - Uptime: ");
+  LoRa.print(millis());
+  
+  // endPacket() trả về 1 nếu gửi thành công, 0 nếu thất bại
+  int result = LoRa.endPacket();
 
-  delay(1000);
+  if (result == 1) {
+    Serial.println(" -> Thanh cong!");
+  } else {
+    Serial.println(" -> THAT BAI (Loi TX)!");
+  }
+
+  delay(3000);
 }

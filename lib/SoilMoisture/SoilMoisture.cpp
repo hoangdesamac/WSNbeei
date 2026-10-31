@@ -18,8 +18,17 @@ void SoilMoisture::begin(float thetaSat, float thetaDry, int adcSat,
   }
 }
 
-int SoilMoisture::readRawADC() { return analogRead(_pinAO); }
+// Bổ sung đọc lọc trung bình nhiều mẫu để chống trôi/nhiễu
+int SoilMoisture::readRawADC(uint8_t samples) {
+  long sum = 0;
+  for (uint8_t i = 0; i < samples; i++) {
+    sum += analogRead(_pinAO);
+    delay(2);
+  }
+  return (int)(sum / samples);
+}
 
+// Giữ nguyên 100% logic công thức tính theta gốc của bạn
 float SoilMoisture::readTheta() {
   int adc = readRawADC();
   float theta =
